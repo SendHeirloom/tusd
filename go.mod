@@ -1,7 +1,7 @@
 module github.com/tus/tusd
 
-// +heroku goVersion 1.13
-go 1.13
+// +heroku goVersion 1.15
+go 1.15
 
 require (
 	cloud.google.com/go v0.40.0
