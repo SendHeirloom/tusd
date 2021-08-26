@@ -1,5 +1,6 @@
 module github.com/tus/tusd
 
+// +heroku goVersion 1.13
 go 1.13
 
 require (
