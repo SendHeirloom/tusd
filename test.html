@@ -1,0 +1,115 @@
+
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Document</title>
+        <script src="https://cdn.jsdelivr.net/npm/dropzone@5.9.2/dist/dropzone.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/tus-js-client@latest/dist/tus.min.js"></script>
+        <style>
+            body {
+                margin: 0;
+                min-height: 100vh;
+            }
+            div {
+                margin-top: 10px;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="error" style="color: red"></div>
+        <div>Progress: <span id="progress">0%</span></div>
+        <div>Uploaded Bytes: <span id="uploaded-bytes">0%</span></div>
+        <div>Total Bytes: <span id="total-bytes">0%</span></div>
+        <div id="download" style="color: red"></div>
+
+        <div style="display: none">
+            <div class="dropzone-previews"></div>
+            <div class="dropzone-click"></div>
+        </div>
+
+        <script>
+            let queue = [];
+            let isProcessing = false;
+            const dropzone = new Dropzone(document.body, {
+                method: 'post',
+                url: 'https://upload.sendheirloom.com/files/',
+                autoProcessQueue: false,
+                timeout: 600000,
+                // maxFilesize: 2500,
+                chunking: false,
+                chunkSize: 50000000, // value in bytes: 15 mb
+                forceChunking: true,
+                parallelUploads: 1,
+                parallelChunkUploads: true,
+                retryChunks: true,
+                acceptedFiles: 'video/*,video/3gpp',
+                clickable: 'body',
+                previewsContainer: '.dropzone-previews',
+                dictMaxFilesExceeded: 'The maximum number of allowed files is 2500.',
+                dictInvalidFileType: 'Unsupported file extension. We currently support the following file formats: .mp4, .mov, .3gp, .avi, .mpg, .wmv, .webm, .flv and .ogv.',
+            });
+
+            dropzone.on('addedfile', (file) => {
+                queue.push(file);
+                processFiles();
+            });
+
+            dropzone.on('error', (file, message, xhr) => {
+                console.log(message);
+            });
+
+            function processFiles() {
+                if (queue && queue.length && !isProcessing) {
+                    isProcessing = true;
+                    uploadStart(queue[0]);
+                }
+            }
+
+            function uploadStart(file) {
+                console.log("Uploading", file.name)
+                const upload = new tus.Upload(file, {
+                    endpoint: 'https://upload.sendheirloom.com/files/',
+                    retryDelays: [0, 50, 100, 150, 200],
+                    chunkSize: 15 * 1000000, // 1MB
+                    metadata: {
+                        filename: file.name,
+                        filetype: file.type,
+                    },
+                    onProgress: function (bytesUploaded, bytesTotal) {
+                        var percentage = ((bytesUploaded / bytesTotal) * 100).toFixed(2);
+
+                        console.log(percentage);
+                        document.getElementById('progress').innerHTML = percentage + '%';
+                        document.getElementById('uploaded-bytes').innerHTML = bytesUploaded;
+                        document.getElementById('total-bytes').innerHTML = bytesTotal;
+                    },
+                    onError: function (error) {
+                        queue = queue.filter((item) => item.upload.uuid !== file.upload.uuid);
+                        isProcessing = false;
+                        processFiles();
+
+                        document.getElementById('error').innerHTML = JSON.stringify(error);
+                    },
+                    onSuccess: function () {
+                        queue = queue.filter((item) => item.upload.uuid !== file.upload.uuid);
+                        isProcessing = false;
+                        processFiles();
+
+
+                        console.log(upload);
+
+                        const message = 'Download: <a target="_blank" href="' + upload.url + '">' + upload.file.name + '</a>';
+                        console.log(message);
+                        document.querySelector('#download').innerHTML = message;
+                    },
+                });
+
+                upload.start();
+            }
+        </script>
+    </body>
+</html>
+

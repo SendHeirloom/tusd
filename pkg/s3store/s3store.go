@@ -71,18 +71,22 @@ package s3store
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/tus/tusd/internal/uid"
 	"github.com/tus/tusd/pkg/handler"
 
@@ -234,14 +238,34 @@ func (store S3Store) NewUpload(ctx context.Context, info handler.FileInfo) (hand
 		metadata[key] = &v
 	}
 
-	// Create the actual multipart upload
-	res, err := store.Service.CreateMultipartUploadWithContext(ctx, &s3.CreateMultipartUploadInput{
+	params := s3.CreateMultipartUploadInput{
 		Bucket:   aws.String(store.Bucket),
 		Key:      store.keyWithPrefix(uploadId),
 		Metadata: metadata,
-	})
+	}
+
+	filename, ok := metadata["filename"]
+	if ok && filename != nil {
+		key := filepath.Join(*params.Key, *filename)
+		params.Key = &key
+	}
+
+	filetype, ok := metadata["filetype"]
+	if ok && filetype != nil {
+		params.ContentType = filetype
+	}
+
+	log.Println("Filename", filename, "Filetype", filetype, "Key", *params.Key)
+
+	// Create the actual multipart upload
+	res, err := store.Service.CreateMultipartUploadWithContext(ctx, &params)
 	if err != nil {
 		return nil, fmt.Errorf("s3store: unable to create multipart upload:\n%s", err)
+	}
+
+	err = store.saveKey(ctx, uploadId, *params.Key)
+	if err != nil {
+		return nil, fmt.Errorf("s3store: unable to save key:\n%s", err)
 	}
 
 	id := uploadId + "+" + *res.UploadId
@@ -250,7 +274,7 @@ func (store S3Store) NewUpload(ctx context.Context, info handler.FileInfo) (hand
 	info.Storage = map[string]string{
 		"Type":   "s3store",
 		"Bucket": store.Bucket,
-		"Key":    *store.keyWithPrefix(uploadId),
+		"Key":    *params.Key,
 	}
 
 	upload := &s3Upload{id, &store, nil}
@@ -291,10 +315,15 @@ func (upload *s3Upload) writeInfo(ctx context.Context, info handler.FileInfo) er
 		return err
 	}
 
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return err
+	}
+
 	// Create object on S3 containing information about the file
 	_, err = store.Service.PutObjectWithContext(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(store.Bucket),
-		Key:           store.metadataKeyWithPrefix(uploadId + ".info"),
+		Key:           aws.String(key + ".info"),
 		Body:          bytes.NewReader(infoJson),
 		ContentLength: aws.Int64(int64(len(infoJson))),
 	})
@@ -307,6 +336,11 @@ func (upload s3Upload) WriteChunk(ctx context.Context, offset int64, src io.Read
 	store := upload.store
 
 	uploadId, multipartId := splitIds(id)
+
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return 0, err
+	}
 
 	// Get the total size of the current upload
 	info, err := upload.GetInfo(ctx)
@@ -375,7 +409,7 @@ func (upload s3Upload) WriteChunk(ctx context.Context, offset int64, src io.Read
 		if n >= store.MinPartSize || isFinalChunk {
 			uploadPartInput := &s3.UploadPartInput{
 				Bucket:     aws.String(store.Bucket),
-				Key:        store.keyWithPrefix(uploadId),
+				Key:        aws.String(key),
 				UploadId:   aws.String(multipartId),
 				PartNumber: aws.Int64(nextPartNum),
 			}
@@ -474,10 +508,15 @@ func (upload s3Upload) fetchInfo(ctx context.Context) (info handler.FileInfo, er
 	store := upload.store
 	uploadId, _ := splitIds(id)
 
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return info, err
+	}
+
 	// Get file info stored in separate object
 	res, err := store.Service.GetObjectWithContext(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(store.Bucket),
-		Key:    store.metadataKeyWithPrefix(uploadId + ".info"),
+		Key:    aws.String(key + ".info"),
 	})
 	if err != nil {
 		if isAwsError(err, "NoSuchKey") {
@@ -531,10 +570,15 @@ func (upload s3Upload) GetReader(ctx context.Context) (io.Reader, error) {
 	store := upload.store
 	uploadId, multipartId := splitIds(id)
 
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return nil, err
+	}
+
 	// Attempt to get upload content
 	res, err := store.Service.GetObjectWithContext(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(store.Bucket),
-		Key:    store.keyWithPrefix(uploadId),
+		Key:    aws.String(key),
 	})
 	if err == nil {
 		// No error occurred, and we are able to stream the object
@@ -552,7 +596,7 @@ func (upload s3Upload) GetReader(ctx context.Context) (io.Reader, error) {
 	// never existsted or just has not been finished yet
 	_, err = store.Service.ListPartsWithContext(ctx, &s3.ListPartsInput{
 		Bucket:   aws.String(store.Bucket),
-		Key:      store.keyWithPrefix(uploadId),
+		Key:      aws.String(key),
 		UploadId: aws.String(multipartId),
 		MaxParts: aws.Int64(0),
 	})
@@ -577,13 +621,18 @@ func (upload s3Upload) Terminate(ctx context.Context) error {
 	wg.Add(2)
 	errs := make([]error, 0, 3)
 
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return err
+	}
+
 	go func() {
 		defer wg.Done()
 
 		// Abort the multipart upload
 		_, err := store.Service.AbortMultipartUploadWithContext(ctx, &s3.AbortMultipartUploadInput{
 			Bucket:   aws.String(store.Bucket),
-			Key:      store.keyWithPrefix(uploadId),
+			Key:      aws.String(key),
 			UploadId: aws.String(multipartId),
 		})
 		if err != nil && !isAwsError(err, "NoSuchUpload") {
@@ -600,13 +649,13 @@ func (upload s3Upload) Terminate(ctx context.Context) error {
 			Delete: &s3.Delete{
 				Objects: []*s3.ObjectIdentifier{
 					{
-						Key: store.keyWithPrefix(uploadId),
+						Key: aws.String(key),
 					},
 					{
-						Key: store.metadataKeyWithPrefix(uploadId + ".part"),
+						Key: aws.String(key + ".part"),
 					},
 					{
-						Key: store.metadataKeyWithPrefix(uploadId + ".info"),
+						Key: aws.String(key + ".info"),
 					},
 				},
 				Quiet: aws.Bool(true),
@@ -645,13 +694,18 @@ func (upload s3Upload) FinishUpload(ctx context.Context) error {
 		return err
 	}
 
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return err
+	}
+
 	if len(parts) == 0 {
 		// AWS expects at least one part to be present when completing the multipart
 		// upload. So if the tus upload has a size of 0, we create an empty part
 		// and use that for completing the multipart upload.
 		res, err := store.Service.UploadPartWithContext(ctx, &s3.UploadPartInput{
 			Bucket:     aws.String(store.Bucket),
-			Key:        store.keyWithPrefix(uploadId),
+			Key:        aws.String(key),
 			UploadId:   aws.String(multipartId),
 			PartNumber: aws.Int64(1),
 			Body:       bytes.NewReader([]byte{}),
@@ -682,7 +736,7 @@ func (upload s3Upload) FinishUpload(ctx context.Context) error {
 
 	_, err = store.Service.CompleteMultipartUploadWithContext(ctx, &s3.CompleteMultipartUploadInput{
 		Bucket:   aws.String(store.Bucket),
-		Key:      store.keyWithPrefix(uploadId),
+		Key:      aws.String(key),
 		UploadId: aws.String(multipartId),
 		MultipartUpload: &s3.CompletedMultipartUpload{
 			Parts: completedParts,
@@ -721,6 +775,11 @@ func (upload *s3Upload) concatUsingDownload(ctx context.Context, partialUploads 
 	store := upload.store
 	uploadId, multipartId := splitIds(id)
 
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return err
+	}
+
 	// Create a temporary file for holding the concatenated data
 	file, err := ioutil.TempFile(store.TemporaryDirectory, "tusd-s3-concat-tmp-")
 	if err != nil {
@@ -733,9 +792,14 @@ func (upload *s3Upload) concatUsingDownload(ctx context.Context, partialUploads 
 		partialS3Upload := partialUpload.(*s3Upload)
 		partialId, _ := splitIds(partialS3Upload.id)
 
+		partialKey, err := store.getKey(ctx, partialId)
+		if err != nil {
+			return err
+		}
+
 		res, err := store.Service.GetObjectWithContext(ctx, &s3.GetObjectInput{
 			Bucket: aws.String(store.Bucket),
-			Key:    store.keyWithPrefix(partialId),
+			Key:    aws.String(partialKey),
 		})
 		if err != nil {
 			return err
@@ -753,7 +817,7 @@ func (upload *s3Upload) concatUsingDownload(ctx context.Context, partialUploads 
 	// Upload the entire file to S3
 	_, err = store.Service.PutObjectWithContext(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(store.Bucket),
-		Key:    store.keyWithPrefix(uploadId),
+		Key:    aws.String(key),
 		Body:   file,
 	})
 	if err != nil {
@@ -767,7 +831,7 @@ func (upload *s3Upload) concatUsingDownload(ctx context.Context, partialUploads 
 	go func() {
 		store.Service.AbortMultipartUploadWithContext(ctx, &s3.AbortMultipartUploadInput{
 			Bucket:   aws.String(store.Bucket),
-			Key:      store.keyWithPrefix(uploadId),
+			Key:      aws.String(key),
 			UploadId: aws.String(multipartId),
 		})
 	}()
@@ -779,6 +843,11 @@ func (upload *s3Upload) concatUsingMultipart(ctx context.Context, partialUploads
 	id := upload.id
 	store := upload.store
 	uploadId, multipartId := splitIds(id)
+
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return err
+	}
 
 	numPartialUploads := len(partialUploads)
 	errs := make([]error, 0, numPartialUploads)
@@ -793,14 +862,20 @@ func (upload *s3Upload) concatUsingMultipart(ctx context.Context, partialUploads
 		go func(i int, partialId string) {
 			defer wg.Done()
 
-			_, err := store.Service.UploadPartCopyWithContext(ctx, &s3.UploadPartCopyInput{
+			partialKey, err := store.getKey(ctx, partialId)
+			if err != nil {
+				errs = append(errs, err)
+				return
+			}
+
+			_, err = store.Service.UploadPartCopyWithContext(ctx, &s3.UploadPartCopyInput{
 				Bucket:   aws.String(store.Bucket),
-				Key:      store.keyWithPrefix(uploadId),
+				Key:      aws.String(key),
 				UploadId: aws.String(multipartId),
 				// Part numbers must be in the range of 1 to 10000, inclusive. Since
 				// slice indexes start at 0, we add 1 to ensure that i >= 1.
 				PartNumber: aws.Int64(int64(i + 1)),
-				CopySource: aws.String(store.Bucket + "/" + partialId),
+				CopySource: aws.String(store.Bucket + "/" + partialKey),
 			})
 			if err != nil {
 				errs = append(errs, err)
@@ -832,12 +907,17 @@ func (upload *s3Upload) DeclareLength(ctx context.Context, length int64) error {
 func (store S3Store) listAllParts(ctx context.Context, id string) (parts []*s3.Part, err error) {
 	uploadId, multipartId := splitIds(id)
 
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return nil, err
+	}
+
 	partMarker := int64(0)
 	for {
 		// Get uploaded parts
 		listPtr, err := store.Service.ListPartsWithContext(ctx, &s3.ListPartsInput{
 			Bucket:           aws.String(store.Bucket),
-			Key:              store.keyWithPrefix(uploadId),
+			Key:              aws.String(key),
 			UploadId:         aws.String(multipartId),
 			PartNumberMarker: aws.Int64(partMarker),
 		})
@@ -889,9 +969,14 @@ func (store S3Store) downloadIncompletePartForUpload(ctx context.Context, upload
 }
 
 func (store S3Store) getIncompletePartForUpload(ctx context.Context, uploadId string) (*s3.GetObjectOutput, error) {
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return nil, err
+	}
+
 	obj, err := store.Service.GetObjectWithContext(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(store.Bucket),
-		Key:    store.metadataKeyWithPrefix(uploadId + ".part"),
+		Key:    aws.String(key + ".part"),
 	})
 
 	if err != nil && (isAwsError(err, s3.ErrCodeNoSuchKey) || isAwsError(err, "NotFound") || isAwsError(err, "AccessDenied")) {
@@ -902,20 +987,30 @@ func (store S3Store) getIncompletePartForUpload(ctx context.Context, uploadId st
 }
 
 func (store S3Store) putIncompletePartForUpload(ctx context.Context, uploadId string, file *os.File) error {
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return err
+	}
+
 	defer cleanUpTempFile(file)
 
-	_, err := store.Service.PutObjectWithContext(ctx, &s3.PutObjectInput{
+	_, err = store.Service.PutObjectWithContext(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(store.Bucket),
-		Key:    store.metadataKeyWithPrefix(uploadId + ".part"),
+		Key:    aws.String(key + ".part"),
 		Body:   file,
 	})
 	return err
 }
 
 func (store S3Store) deleteIncompletePartForUpload(ctx context.Context, uploadId string) error {
-	_, err := store.Service.DeleteObjectWithContext(ctx, &s3.DeleteObjectInput{
+	key, err := store.getKey(ctx, uploadId)
+	if err != nil {
+		return err
+	}
+
+	_, err = store.Service.DeleteObjectWithContext(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(store.Bucket),
-		Key:    store.metadataKeyWithPrefix(uploadId + ".part"),
+		Key:    aws.String(key + ".part"),
 	})
 	return err
 }
@@ -984,23 +1079,55 @@ func (store S3Store) calcOptimalPartSize(size int64) (optimalPartSize int64, err
 	return optimalPartSize, nil
 }
 
-func (store S3Store) keyWithPrefix(key string) *string {
+func (store S3Store) saveKey(ctx context.Context, id, key string) error {
+	// We really want our keys to include more than just the id, so we need to store them
+	// somewhere between requests and even machine crashes.
+	return getRedis().Set(ctx, "TUS:key:"+id, key, 6*time.Hour).Err()
+}
+
+func (store S3Store) getKey(ctx context.Context, id string) (key string, err error) {
+	val, err := getRedis().Get(ctx, "TUS:key:"+id).Result()
+	if err != nil {
+		return "", err
+	}
+
+	if val == "" {
+		return "", errors.New("Key not found")
+	}
+
+	return val, nil
+}
+
+func (store S3Store) keyWithPrefix(id string) *string {
 	prefix := store.ObjectPrefix
 	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
 
-	return aws.String(prefix + key)
+	return aws.String(prefix + id)
 }
 
-func (store S3Store) metadataKeyWithPrefix(key string) *string {
-	prefix := store.MetadataObjectPrefix
-	if prefix == "" {
-		prefix = store.ObjectPrefix
-	}
-	if prefix != "" && !strings.HasSuffix(prefix, "/") {
-		prefix += "/"
+var REDIS *redis.Client
+
+func getRedis() *redis.Client {
+	if REDIS == nil {
+		var url = os.Getenv("REDIS_URL")
+		if url == "" {
+			panic("No redis URL set")
+		}
+
+		opt, err := redis.ParseURL(url)
+		if err != nil {
+			panic(err)
+		}
+
+		opt.TLSConfig = &tls.Config{
+			// Heroku uses self-signed certs
+			InsecureSkipVerify: true,
+		}
+
+		REDIS = redis.NewClient(opt)
 	}
 
-	return aws.String(prefix + key)
+	return REDIS
 }
