@@ -71,6 +71,7 @@ package s3store
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1115,6 +1116,11 @@ func getRedis() *redis.Client {
 		opt, err := redis.ParseURL(url)
 		if err != nil {
 			panic(err)
+		}
+
+		opt.TLSConfig = &tls.Config{
+			// Heroku uses self-signed certs
+			InsecureSkipVerify: true,
 		}
 
 		REDIS = redis.NewClient(opt)
