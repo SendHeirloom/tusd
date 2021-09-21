@@ -77,6 +77,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -253,6 +254,8 @@ func (store S3Store) NewUpload(ctx context.Context, info handler.FileInfo) (hand
 	if ok && filetype != nil {
 		params.ContentType = filetype
 	}
+
+	log.Println("Filename", filename, "Filetype", filetype, "Key", *params.Key)
 
 	// Create the actual multipart upload
 	res, err := store.Service.CreateMultipartUploadWithContext(ctx, &params)
