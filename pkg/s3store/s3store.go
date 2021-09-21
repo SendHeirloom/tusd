@@ -78,6 +78,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -234,12 +235,25 @@ func (store S3Store) NewUpload(ctx context.Context, info handler.FileInfo) (hand
 		metadata[key] = &v
 	}
 
-	// Create the actual multipart upload
-	res, err := store.Service.CreateMultipartUploadWithContext(ctx, &s3.CreateMultipartUploadInput{
+	params := s3.CreateMultipartUploadInput{
 		Bucket:   aws.String(store.Bucket),
 		Key:      store.keyWithPrefix(uploadId),
 		Metadata: metadata,
-	})
+	}
+
+	filename, ok := metadata["filename"]
+	if ok && filename != nil {
+		key := filepath.Join(*params.Key, *filename)
+		params.Key = &key
+	}
+
+	filetype, ok := metadata["filetype"]
+	if ok && filetype != nil {
+		params.ContentType = filetype
+	}
+
+	// Create the actual multipart upload
+	res, err := store.Service.CreateMultipartUploadWithContext(ctx, &params)
 	if err != nil {
 		return nil, fmt.Errorf("s3store: unable to create multipart upload:\n%s", err)
 	}
