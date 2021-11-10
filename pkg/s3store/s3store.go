@@ -255,7 +255,11 @@ func (store S3Store) NewUpload(ctx context.Context, info handler.FileInfo) (hand
 		params.ContentType = filetype
 	}
 
-	log.Println("Filename", filename, "Filetype", filetype, "Key", *params.Key)
+	if filename != nil && filetype != nil {
+		log.Println("Filename", *filename, "Filetype", *filetype, "Key", *params.Key)
+	} else {
+		log.Println("Skipped logging filename and filetype")
+	}
 
 	// Create the actual multipart upload
 	res, err := store.Service.CreateMultipartUploadWithContext(ctx, &params)
