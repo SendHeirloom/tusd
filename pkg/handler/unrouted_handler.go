@@ -1030,6 +1030,13 @@ func getHostAndProtocol(r *http.Request, allowForwarded bool) (host, proto strin
 		return
 	}
 
+	// Check for X-Forwarded-Host header
+	if fh := r.Header.Get("X-Forwarded-For"); fh != "" {
+		// This is in Cloudflare, where other headers aren't sent
+		host = fh
+		proto = "https"
+	}
+
 	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
 		host = h
 	}
