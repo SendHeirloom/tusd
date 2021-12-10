@@ -1096,7 +1096,13 @@ func (store S3Store) saveKey(ctx context.Context, id, key string) error {
 
 	// We really want our keys to include more than just the id, so we need to store them
 	// somewhere between requests and even machine crashes.
-	return redis.Set(ctx, "TUS:key:"+id, key, 6*time.Hour).Err()
+	err := redis.Set(ctx, "TUS:key:"+id, key, 6*time.Hour).Err()
+	if err != nil {
+		log.Println("WARNING Error saving to Redis, if there are multiple hosts or this machine reboots this uploads metadata will be lost.\n", err)
+	}
+
+	// Never error as we need uploads to hopefully work even when Redis doesn't.
+	return nil
 }
 
 func (store S3Store) getKey(ctx context.Context, id string) (key string, err error) {
