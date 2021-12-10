@@ -86,6 +86,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ReneKroon/ttlcache/v2"
 	"github.com/go-redis/redis/v8"
 	"github.com/tus/tusd/internal/uid"
 	"github.com/tus/tusd/pkg/handler"
@@ -1086,22 +1087,39 @@ func (store S3Store) calcOptimalPartSize(size int64) (optimalPartSize int64, err
 }
 
 func (store S3Store) saveKey(ctx context.Context, id, key string) error {
+	redis, cache := getMetadataStores()
+
+	// The local cache might offer a slight performance improvement, but we actually
+	// use it because we've had the REDIS connection fail, and as we're usually only
+	// using one host, this is all we need:
+	cache.Set("TUS:key:"+id, key)
+
 	// We really want our keys to include more than just the id, so we need to store them
 	// somewhere between requests and even machine crashes.
-	return getRedis().Set(ctx, "TUS:key:"+id, key, 6*time.Hour).Err()
+	return redis.Set(ctx, "TUS:key:"+id, key, 6*time.Hour).Err()
 }
 
 func (store S3Store) getKey(ctx context.Context, id string) (key string, err error) {
-	val, err := getRedis().Get(ctx, "TUS:key:"+id).Result()
+	redis, cache := getMetadataStores()
+
+	lVal, err := cache.Get("TUS:key:" + id)
 	if err != nil {
-		return "", err
+		// err == ttlcache.ErrNotFound if the key is missing
+		// but we might as well try redis with any error
+
+		key, err = redis.Get(ctx, "TUS:key:"+id).Result()
+		if err != nil {
+			return "", err
+		}
+
+		if key == "" {
+			return "", errors.New("Key not found")
+		}
+	} else {
+		key = lVal.(string)
 	}
 
-	if val == "" {
-		return "", errors.New("Key not found")
-	}
-
-	return val, nil
+	return
 }
 
 func (store S3Store) keyWithPrefix(id string) *string {
@@ -1114,8 +1132,9 @@ func (store S3Store) keyWithPrefix(id string) *string {
 }
 
 var REDIS *redis.Client
+var localCache *ttlcache.Cache
 
-func getRedis() *redis.Client {
+func getMetadataStores() (*redis.Client, *ttlcache.Cache) {
 	if REDIS == nil {
 		var url = os.Getenv("REDIS_URL")
 		if url == "" {
@@ -1135,5 +1154,10 @@ func getRedis() *redis.Client {
 		REDIS = redis.NewClient(opt)
 	}
 
-	return REDIS
+	if localCache == nil {
+		localCache = ttlcache.NewCache()
+		localCache.SetTTL(time.Duration(6 * time.Hour))
+	}
+
+	return REDIS, localCache
 }
