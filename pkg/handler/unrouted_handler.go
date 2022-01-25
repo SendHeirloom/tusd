@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -1033,7 +1034,7 @@ func getHostAndProtocol(r *http.Request, allowForwarded bool) (host, proto strin
 	// Check for X-Forwarded-Host header
 	if fh := r.Header.Get("CF-Connecting-IP"); fh != "" {
 		// This is in Cloudflare, where other headers aren't sent
-		host = "upload.sendheirloom.com"
+		host = os.Getenv("HOST")
 		proto = "https"
 		return
 	}
