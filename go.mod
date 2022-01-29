@@ -9,7 +9,7 @@ require (
 	cloud.google.com/go/storage v1.18.2
 	github.com/Azure/azure-storage-blob-go v0.14.0
 	github.com/ReneKroon/ttlcache/v2 v2.10.0
-	github.com/aws/aws-sdk-go v1.42.2
+	github.com/aws/aws-sdk-go v1.42.44
 	github.com/bmizerany/pat v0.0.0-20170815010413-6226ea591a40
 	github.com/go-redis/redis/v8 v8.11.3
 	github.com/golang/mock v1.6.0
@@ -18,6 +18,7 @@ require (
 	github.com/prometheus/client_golang v1.11.0
 	github.com/sethgrid/pester v0.0.0-20190127155807-68a33a018ad0
 	github.com/stretchr/testify v1.7.0
+	github.com/tus/tusd v1.8.0
 	github.com/vimeo/go-util v1.4.1
 	google.golang.org/api v0.60.0
 	google.golang.org/grpc v1.42.0
