@@ -11,7 +11,7 @@ require (
 	github.com/ReneKroon/ttlcache/v2 v2.10.0
 	github.com/aws/aws-sdk-go v1.42.2
 	github.com/bmizerany/pat v0.0.0-20170815010413-6226ea591a40
-	github.com/go-redis/redis/v8 v8.11.3
+	github.com/go-redis/redis/v8 v8.11.4
 	github.com/golang/mock v1.6.0
 	github.com/golang/protobuf v1.5.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
