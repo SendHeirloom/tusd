@@ -24,7 +24,7 @@ jobs:
         uses: docker/metadata-action@v3.6.0
         with:
           images: |
-            ghcr.io/tus/tusd
+            ghcr.io/sendheirloom/tusd
             tusproject/tusd
           tags: |
             type=sha

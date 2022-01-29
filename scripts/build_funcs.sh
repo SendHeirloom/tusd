@@ -17,7 +17,7 @@ function compile {
   mkdir -p "$dir"
   GOOS=$os GOARCH=$arch go build \
     -trimpath \
-    -ldflags="-X github.com/tus/tusd/cmd/tusd/cli.VersionName=${version} -X github.com/tus/tusd/cmd/tusd/cli.GitCommit=${commit} -X 'github.com/tus/tusd/cmd/tusd/cli.BuildDate=$(date --utc)'" \
+    -ldflags="-X github.com/sendheirloom/tusd/cmd/tusd/cli.VersionName=${version} -X github.com/sendheirloom/tusd/cmd/tusd/cli.GitCommit=${commit} -X 'github.com/sendheirloom/tusd/cmd/tusd/cli.BuildDate=$(date --utc)'" \
     -o "$dir/tusd$ext" ./cmd/tusd/main.go
 }
 
@@ -62,7 +62,7 @@ function makedep {
   echo "Priority: optional" >> "./$dir/DEBIAN/control"
   echo "Version: ${version:1}" >> "./$dir/DEBIAN/control"
   echo "Architecture: ${arch}" >> "./$dir/DEBIAN/control"
-  echo "Homepage: https://github.com/tus/tusd" >> "./$dir/DEBIAN/control"
+  echo "Homepage: https://github.com/sendheirloom/tusd" >> "./$dir/DEBIAN/control"
   echo "Built-Using: $(go version)" >> "./$dir/DEBIAN/control"
   echo "Description: The official server implementation of the tus resumable upload protocol." >> "./$dir/DEBIAN/control"
 

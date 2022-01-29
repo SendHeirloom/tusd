@@ -4,7 +4,7 @@
 
 You can download ready-to-use packages including binaries for OS X, Linux and
 Windows in various formats of the
-[latest release](https://github.com/tus/tusd/releases/latest).
+[latest release](https://github.com/sendheirloom/tusd/releases/latest).
 
 ## Compile from source
 
@@ -15,7 +15,7 @@ If you meet this criteria, you can clone the git repository, install the remaini
 dependencies and build the binary:
 
 ```bash
-git clone git@github.com:tus/tusd.git
+git clone git@github.com:sendheirloom/tusd.git
 cd tusd
 
 go build -o tusd cmd/tusd/main.go

@@ -10,11 +10,11 @@ import (
 	"github.com/Azure/azure-storage-blob-go/azblob"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	"github.com/tus/tusd/pkg/azurestore"
-	"github.com/tus/tusd/pkg/handler"
+	"github.com/sendheirloom/tusd/pkg/azurestore"
+	"github.com/sendheirloom/tusd/pkg/handler"
 )
 
-//go:generate mockgen -destination=./azurestore_mock_test.go -package=azurestore_test github.com/tus/tusd/pkg/azurestore AzService,AzBlob
+//go:generate mockgen -destination=./azurestore_mock_test.go -package=azurestore_test github.com/sendheirloom/tusd/pkg/azurestore AzService,AzBlob
 
 // Test interface implementations
 var _ handler.DataStore = azurestore.AzureStore{}

@@ -88,8 +88,8 @@ import (
 
 	"github.com/ReneKroon/ttlcache/v2"
 	"github.com/go-redis/redis/v8"
-	"github.com/tus/tusd/internal/uid"
-	"github.com/tus/tusd/pkg/handler"
+	"github.com/sendheirloom/tusd/internal/uid"
+	"github.com/sendheirloom/tusd/pkg/handler"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"

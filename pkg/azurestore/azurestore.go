@@ -10,8 +10,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/tus/tusd/internal/uid"
-	"github.com/tus/tusd/pkg/handler"
+	"github.com/sendheirloom/tusd/internal/uid"
+	"github.com/sendheirloom/tusd/pkg/handler"
 )
 
 type AzureStore struct {

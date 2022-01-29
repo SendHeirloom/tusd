@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tus/tusd/pkg/handler"
+	"github.com/sendheirloom/tusd/pkg/handler"
 )
 
 const (
